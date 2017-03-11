@@ -38,16 +38,66 @@ and your new interface should pull an IP for your routers DHCP pool, be sure to 
 Now that you have your system setup, lets go through some basic network analysis with SecurityOnion as our surveillance system. We'll start where all good attacks start. 
 
 ## The Recon
-Now from a BlueTeam perspective obviously your enemy has already done their passive recon, whois lookups, internet archives, basic OSINT research. We won't be able to detect much of that but as soon as their recon turns from passive to active network recon, we'll get our earliest indicators that someone is up to no good, and obviously the earlier we can detect them within the [Cyber Killchain](http://www.lockheedmartin.com/content/dam/lockheed/data/corporate/documents/LM-White-Paper-Intel-Driven-Defense.pdf) the better positioned we will be, to prevent them from doing further damage to our network... 
+Now from a BlueTeam perspective obviously your enemy has already done their passive recon, whois lookups, internet archives, basic OSINT research. While there are some steps we can take to limit the ammount of breadcrums we provide for our attacker. We probably won't be able to detect much of that passive recon, but as soon as their recon turns from passive to active network recon, we'll get our earliest indicators that someone is up to no good, and obviously the earlier we can detect them within the [Cyber Killchain](http://www.lockheedmartin.com/content/dam/lockheed/data/corporate/documents/LM-White-Paper-Intel-Driven-Defense.pdf) the better positioned we will be to prevent them from doing further damage to our network.
+
+Utilizing the examples provided by [pentest-standard.org](http://www.pentest-standard.org/index.php/Intelligence_Gathering#Active_Footprinting) for Active Recon. We will start with the most common method.
+
+#### Scanning
+In order to get a general lay of the LAN, we will perform a simple network ping sweep/scan from my Kali box. For this, we will utilize [Nmap](https://nmap.org/book/man.html) as follows:
+
+~~~
+nmap -sn 192.168.56.1-255
+~~~
+
+This is called a "No Port Scan" by nmap and it will allows us to scan a range of IPs using the above range notation or CIDR / notation. This will let us know by IP address how many systems are responding on the network. 
+
+According to the nmap man page 
+
+> *"default host discovery done with -sn consists of an ICMP echo request, TCP SYN to port 443, TCP ACK to port 80, and an ICMP timestamp request. When executed by an unprivileged user, only SYN Packets are sent (using a connect call) to port 80 and 443 on the target. **When a priviledged user tries to scan targets on a local ethernet network, ARP  requests are used unless --send-ip was specfied.**" -nmap manpage*
+
+Note the information in bold is important when using a systems root user (which is considered bad practice but common among people running Kali), also note that this type of scan is considered to allow:
+
+> *"Light reconnaissance of a target network without attracting much attention." -nmap manpage*
+
+Now you will notice that when using SecurityOnions default settings, this scan does not generate any alerts in sguil or logs in elsa for that matter, however there are many tell-tale signs (network forensic artifacts) within SecurityOnion that there has been communications from our attack box to the rest of our network. So lets see what we can find.
+
+Since we know what the answer to this test is, let's start our hunt by looking for ARP(Address Resolution Protocol) requests. Since Elsa and Sguil came up with no freebies in the alert department, lets go straight to our packet capture data located in 
+
+**/nsm/sensor_data/\<interface\>-eth1/dailylogs/timestandedfolder/**
+
+In this folder you will find files labeled like "snort.log.1234567890" these are your pcap files for that day and the numbers at the end are the [unix epoc](https://en.wikipedia.org/wiki/Unix_time) time-stamps for each log (basically the start time).
+
+Lets start by doing things the cheaters way and pull this pcap up in wireshark. Now this wouldn't be realistic in most situations as these pcaps on a gigabit network would be significantly larger and would likely kill your poor wireshark instance. But for our lab the packet is relatively small and it's a good starting point.
+
+~~~
+wireshark snort.log.1234567890
+~~~
+
+Now because we already know we are looking for ARP requests as per the nmap man page about -sn scans, lets sort our packets by protocal by clicking the "Protocal" header. Looking through the data in wireshark shows us exactly what we expected to see. You see the source is the MAC Address of your attack machine sending ARP Requests to the broadcast address, effectively asking everyone on the net who has a given IP address and for them to forward that information to the IP of our attack machine (as seen in the Info column. These requests run all the way from 1-255 just as our nmap command directed.
+
+![Tshark-ARPscan](./ScreenShots/WIRESHARK-SCAN-ARP.png) 
+
+Alternatively we could have achieved similar results with tshark, the commandline version of wireshark, but this time we can streamline our search by piping our pcap into grep and look directly for ARP requests and piping it again through less to easily search through the results.
+
+~~~
+tshark -r snort.log.123456890 |grep ARP|less
+~~~
+![Tshark-ARPscan](./ScreenShots/TSHARK-SCAN-ARP.png) 
+
 
 <p style="text-align: center;font-weight:bold"> To be continued.<p>
 
 
-
-
 # References
 
-- https://www.virtualbox.org/manual/
-- https://github.com/Security-Onion-Solutions/security-onion/wiki
-- https://groups.google.com/forum/#!forum/security-onion
-- http://www.lockheedmartin.com/content/dam/lockheed/data/corporate/documents/LM-White-Paper-Intel-Driven-Defense.pdf
+1 https://www.virtualbox.org/manual/
+
+2 https://github.com/Security-Onion-Solutions/security-onion/wiki
+
+3 https://groups.google.com/forum/#!forum/security-onion
+
+4 http://www.lockheedmartin.com/content/dam/lockheed/data/corporate/documents/LM-White-Paper-Intel-Driven-Defense.pdf
+
+5 http://www.pentest-standard.org/index.php/Intelligence_Gathering#Active_Footprinting
+
+
