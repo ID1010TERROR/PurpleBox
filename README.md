@@ -23,9 +23,7 @@ iface eth1 inet dhcp
 
 After doing this be sure to run:
 
-~~~~
-sudo ifup eth1
-~~~~
+> kali-root#  **sudo ifup eth1**
 
 and your new interface should pull an IP for your routers DHCP pool, be sure to confirm by checking ifconfig.
 
@@ -45,9 +43,9 @@ Utilizing the examples provided by [pentest-standard.org](http://www.pentest-sta
 #### Scanning
 In order to get a general lay of the LAN, we will perform a simple network ping sweep/scan from my Kali box. For this, we will utilize [Nmap](https://nmap.org/book/man.html) as follows:
 
-~~~
-nmap -sn 192.168.56.1-255
-~~~
+> kali-root#  **nmap -sn 192.168.56.1-255**
+
+**IMAGE PLACEHOLDER**
 
 This is called a "No Port Scan" by nmap and it will allows us to scan a range of IPs using the above range notation or CIDR / notation. This will let us know by IP address how many systems are responding on the network. 
 
@@ -61,28 +59,62 @@ Note the information in bold is important when using a systems root user (which 
 
 Now you will notice that when using SecurityOnions default settings, this scan does not generate any alerts in sguil or logs in elsa for that matter, however there are many tell-tale signs (network forensic artifacts) within SecurityOnion that there has been communications from our attack box to the rest of our network. So lets see what we can find.
 
-Since we know what the answer to this test is, let's start our hunt by looking for ARP(Address Resolution Protocol) requests. Since Elsa and Sguil came up with no freebies in the alert department, lets go straight to our packet capture data located in 
+Since we know what the answer to this test is, let's start our hunt by looking for ARP(Address Resolution Protocol) requests. Since ELSA and Sguil came up with no freebies in the alert department, lets go straight to our packet capture data located in 
 
 **/nsm/sensor_data/\<interface\>-eth1/dailylogs/timestandedfolder/**
 
 In this folder you will find files labeled like "snort.log.1234567890" these are your pcap files for that day and the numbers at the end are the [unix epoc](https://en.wikipedia.org/wiki/Unix_time) time-stamps for each log (basically the start time).
 
-Lets start by doing things the cheaters way and pull this pcap up in wireshark. Now this wouldn't be realistic in most situations as these pcaps on a gigabit network would be significantly larger and would likely kill your poor wireshark instance. But for our lab the packet is relatively small and it's a good starting point.
+Now this wouldn't be realistic in most situations as these pcaps on a gigabit network would be significantly larger and would likely kill your poor wireshark instance. But for our lab the packet is relatively small and it's a good starting point.
 
-~~~
-wireshark snort.log.1234567890
-~~~
+> securityonion-user$ **wireshark snort.log.1234567890**
 
-Now because we already know we are looking for ARP requests as per the nmap man page about -sn scans, lets sort our packets by protocal by clicking the "Protocal" header. Looking through the data in wireshark shows us exactly what we expected to see. You see the source is the MAC Address of your attack machine sending ARP Requests to the broadcast address, effectively asking everyone on the net who has a given IP address and for them to forward that information to the IP of our attack machine (as seen in the Info column. These requests run all the way from 1-255 just as our nmap command directed.
+Now because we already know we are looking for ARP requests as per the nmap man page about -sn scans, lets sort our packets by protocal by clicking the "Protocal" header. Looking through the data in wireshark shows us exactly what we expected to see. You see the source is the MAC Address of your attack machine sending ARP Requests to the broadcast address, effectively asking everyone on the net who has a given IP address and for them to forward that information to the IP of our attack machine (as seen in the Info column). These requests run all the way from 1-255 just as our nmap command directed.
 
-![Tshark-ARPscan](./ScreenShots/WIRESHARK-SCAN-ARP.png) 
+![WIRESHARK-SCAN-ARP](./ScreenShots/WIRESHARK-SCAN-ARP.png) 
 
-Alternatively we could have achieved similar results with tshark, the commandline version of wireshark, but this time we can streamline our search by piping our pcap into grep and look directly for ARP requests and piping it again through less to easily search through the results.
+Alternatively we could have achieved similar results with tshark, the commandline version of wireshark, but this time we can streamline our search by piping our pcap into grep and look directly for ARP requests and piping it again through less to easily search through the results. This method would also be more realistic for searching through large pcaps.
 
-~~~
-tshark -r snort.log.123456890 |grep ARP|less
-~~~
-![Tshark-ARPscan](./ScreenShots/TSHARK-SCAN-ARP.png) 
+> securityonion-user$ **tshark -r snort.log.123456890 |grep ARP|less**
+
+![TSHARK-SCAN-ARP](./ScreenShots/TSHARK-SCAN-ARP.png) 
+
+#### Banner Grabbing
+Now that the attacker has successfully determined what systems are up on the network, his next step is to enumerate the ports that are available for connection on the IPs we acquired and possibly identify what software is running on that port. This is known as banner grabbing. One of the simplest ways to do this is by using NMAP as follows: 
+
+> kali-root#  **nmap -sV 192.168.56.101**
+
+**IMAGE PLACEHOLDER**
+
+The -sV scan or "Version Detection" scan will attempt to connect to various ports and capture the banners provided by them, for the attacker this provides more detailed information about what is actually running on that port. However, since that is making actual connections, this type of scan makes significantly more noise and is quickly picked up by SecurityOnions default configuration. As shown in the image below, everything from Alert ID 3.29 and down are artifacts found by Snort after running this scan.
+
+![SGUIL-BANNERGRAB-by-NMAP](./ScreenShots/SGUIL-BANNERGRAB-by-NMAP.png)
+
+From here we can easily pivot from Sguil into Wireshark to see the connections made. To do this rightclick the "Alert ID" of our first suspicious Alert ID - 3.29, then select "Wireshark". This opens that TCP stream for us to investigate further.
+
+
+![SGUIL-BANNERGRAB-MySQL-by-NMAP](./ScreenShots/SGUIL-BANNERGRAB-MySQL-by-NMAP.png)
+
+As you can see our Kali box at IP 192.168.56.103 started a 3 way handshake with our Metasploitable box at IP 192.168.56.101 on port 3306 (mySQL) and then abruptly resets the connection after it got the information it needed.
+
+Analysing the next two hits (using the same method to reach them in wireshark) we see the two attempts that were made on ports 5904 and 5811 were replied back with RST/ACKs, which means nothing is listening on that port, and yet our Kali box tells us that it successfully found VNC on port 5900. This tells us we missed something. 
+
+So instead of looking deeper into those two TCP streams in wireshark, lets Pivot to ELSA from SGUIL by rightclicking the IP Address of our attacker x.x.x.103 and Select "ELSA IP LOOKUP" and then select "SRC IP". Authenticate into ELSA and if all goes well you'll be greated with a bar graph showing you the various logs that are available for you to assess.
+
+We will start with the bro_conn logs to see what connections were made from this IP Address. To ensure we see everything, change the paging box from 15 to 500, this will allow us to see more of the logs in one shot, also to make these logs easier to read, check the "Grid Display" box.
+
+![ELSA-BANNERGRAB-by-NMAP](./ScreenShots/ELSA-BANNERGRAB-by-NMAP.png)
+
+Alright, well it should seem pretty odd that we have one IP trying to talk to another IP using a bunch of different ports, that's not normal. To give this a better view, lets uncheck "Grid Display" again and then click one of the links that reads "dstport()".
+
+![ELSA-BANNERGRAB-groupbydstport-by-NMAP](./ScreenShots/ELSA-BANNERGRAB-groupbydstport-by-NMAP.png)
+
+Much better, now we have a nice little chart on the left that shows all of the ports our badbox was trying to reach out too. A quick and dirty way to evaluate this is that if a port has a count of under 3 connections then a connection was likely unsuccessful, because a 3wayhandshake takes at least 3 interactions to complete, this is ofcourse assuming that there was only one scan. Now going off of this logic anything over a count of 2 likely replied by with a syn/ack and provided our kali box with information about its configuration. Indeed this information coorilates to the information obtained by our Nmap Scan.
+
+Now that the attacker has done his initial recon, he is ready to launch his first set of attacks on the system.
+
+### Exploitation
+
 
 
 <p style="text-align: center;font-weight:bold"> To be continued.<p>
