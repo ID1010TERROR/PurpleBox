@@ -65,13 +65,17 @@ Since we know what the answer to this test is, let's start our hunt by looking f
 
 In this folder you will find files labeled like "snort.log.1234567890" these are your pcap files for that day and the numbers at the end are the [unix epoc](https://en.wikipedia.org/wiki/Unix_time) time-stamps for each log (basically the start time).
 
-Now this wouldn't be realistic in most situations as these pcaps on a gigabit network would be significantly larger and would likely kill your poor wireshark instance. But for our lab the packet is relatively small and it's a good starting point.
+##### Wireshark Method
+
+Now this wouldn't be realistic in most situations as these pcaps on a gigabit network would be significantly larger and would likely kill your poor wireshark instance. But for our lab the packet is relatively small and using the wireshark gui will is the easiest way to start understanding what's going on in your packets.
 
 > securityonion-user$ **wireshark snort.log.1234567890**
 
-Now because we already know we are looking for ARP requests as per the nmap man page about -sn scans, lets sort our packets by protocal by clicking the "Protocal" header. Looking through the data in wireshark shows us exactly what we expected to see. You see the source is the MAC Address of your attack machine sending ARP Requests to the broadcast address, effectively asking everyone on the net who has a given IP address and for them to forward that information to the IP of our attack machine (as seen in the Info column). These requests run all the way from 1-255 just as our nmap command directed.
+Now because we already know we are looking for ARP requests as per the nmap man page about -sn scans, lets sort our packets by protocal by clicking the "Protocol" header. (Alternatively we could have simply applied a display filter with the "arp" filter) Looking through the data in wireshark shows us exactly what we expected to see. You see the source is the MAC Address of your attack machine sending ARP Requests to the broadcast address, effectively asking everyone on the net who has a given IP address and for them to forward that information to the IP of our attack machine (as seen in the Info column). These requests run all the way from 1-255 just as our nmap command directed. We will also see (as in packet 28) that we can tell who gave up the goods about being alive on the net.
 
 ![WIRESHARK-SCAN-ARP](./ScreenShots/WIRESHARK-SCAN-ARP.png) 
+
+##### TShark Method
 
 Alternatively we could have achieved similar results with tshark, the commandline version of wireshark, but this time we can streamline our search by piping our pcap into grep and look directly for ARP requests and piping it again through less to easily search through the results. This method would also be more realistic for searching through large pcaps.
 
@@ -79,7 +83,25 @@ Alternatively we could have achieved similar results with tshark, the commandlin
 
 ![TSHARK-SCAN-ARP](./ScreenShots/TSHARK-SCAN-ARP.png) 
 
+
+##### ARGUS method
+
+Yet another method would be to use the flow tool ARGUS (Audit Record Generation and Utilization System), this method requires that we first convert our our snort.log.1234567890 file to a flow format, to do this, run the following
+
+> securityonion-user$ **argus -r snort.log.1234567890 -w /tmp/packet.argus**
+
+This command takes our snort file as input using -r and writes it to the /tmp/ directory as packet.argus using the -w switch. Now that it's in a format our program understand we can run ra (read argus) in order to read our newly created argus file.
+
+> securityonion-user$ **ra -r packet.argus - 'src host 192.168.56.103' | grep arp | grep CON**
+
+This command allows shows us only successful arp connections ('src host 192.168.1.56.103' not shown in image, but allows you to narrow your search to only flows originating from .103). For us, this means that our attack machine 103, has successfully enumerated systems .100, .1, and .101
+
+![ARGUS-SCAN-ARP](./ScreenShots/ARGUS-SCAN-ARP.png) 
+
+
+
 #### Banner Grabbing
+
 Now that the attacker has successfully determined what systems are up on the network, his next step is to enumerate the ports that are available for connection on the IPs we acquired and possibly identify what software is running on that port. This is known as banner grabbing. One of the simplest ways to do this is by using NMAP as follows: 
 
 > kali-root#  **nmap -sV 192.168.56.101**
@@ -113,7 +135,7 @@ Much better, now we have a nice little chart on the left that shows all of the p
 
 Now that the attacker has done his initial recon, he is ready to launch his first set of attacks on the system.
 
-### Exploitation
+## Exploitation
 
 
 
